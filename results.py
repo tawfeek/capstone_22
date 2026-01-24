@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 
-DEFAULT_PREDICTIONS_CSV = "results/predictions.csv"
+DEFAULT_PREDICTIONS_CSV = "results/predictions_test.csv"
 DEFAULT_RESULTS_JSON = "results/prediction_summary.json"
 
 
