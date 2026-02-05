@@ -9,8 +9,8 @@ def main():
     # Set to True to run that step, False to skip
     steps = {
         "clean": True,          # Clean artifacts before running
-        "preprocess": False,      # Run preprocessing only
-        "train": False,          # Run training
+        "preprocess": True,      # Run preprocessing only
+        "train": True,          # Run training
         "predict": False,        # Run prediction
         "summary": False,        # Generate summary
         "full_pipeline": False,  # Run full pipeline (overrides individual steps)
@@ -22,16 +22,17 @@ def main():
         "inputs": ["data/raw/listings LA.csv", "data/raw/listings NYC.csv"],
         "output": "data/processed/listings_combined_clean.csv",
         "inference": False,  # Set True to keep rows with missing target
-
         # Training params
-        "model": "mlp",
+        "is_training":False,
+        "model": "hist_gradient_boosting",
         "test_size": 0.2,
         "cv": 5,
-        "n_iter": 1,  # Number of Optuna trials
+        "n_iter": 5,  # Number of Optuna trials
         "tune": True,
         "wandb": True
     }
-
+    if steps["train"] or steps["full_pipeline"]:
+        params["is_training"]=True
     print(f"🚀 Running experiments from main_experiments.py")
     print(f"Steps enabled: {[k for k, v in steps.items() if v]}")
     print(f"Parameters: {params}\n")
@@ -48,7 +49,8 @@ def main():
             cv=params["cv"],
             n_iter=params["n_iter"],
             tune=params["tune"],
-            wandb=params["wandb"]
+            wandb=params["wandb"],
+            istraining=params["is_training"]
         )
     else:
         # Run individual steps
@@ -67,7 +69,8 @@ def main():
                 c,
                 inputs=params["inputs"],
                 output=params["output"],
-                inference=params["inference"]
+                inference=params["inference"],
+                is_training=params["is_training"]
             )
             print()
 

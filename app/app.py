@@ -10,6 +10,8 @@ from sklearn.model_selection import train_test_split
 
 import os
 
+from preprocess import preprocess
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_PATH = BASE_DIR / "data" / "processed" / "listings_combined_clean.csv"
 MODEL_PATH = BASE_DIR / "models" / "model.joblib"
@@ -48,7 +50,7 @@ NOISE_FEATURES = [
     "bathrooms", "has_fire_extinguisher", "name_length", "has_pool",
     "accommodates", "has_ac", "beds",
 ]
-
+TOP_PROPERTY_TYPE=['Entire rental unit', 'Entire home', 'Private room in rental unit', 'Private room in home', 'Entire guesthouse', 'Entire condo', 'Room in hotel', 'Entire guest suite', 'Private room in townhouse', 'Entire townhouse', 'Private room in condo', 'Entire loft', 'Entire villa', 'Entire bungalow', 'Room in boutique hotel', 'Private room in guest suite', 'Entire serviced apartment', 'Private room in villa', 'Private room in loft', 'Private room in bed and breakfast']
 RESPONSE_TIME_MAP = {
     "within an hour": 5,
     "within a few hours": 4,
@@ -157,40 +159,41 @@ def page_eda():
     st.markdown("---")
 
     st.subheader("City Comparison: LA vs NYC")
-    col1, col2 = st.columns(2)
+    if "city" in df.columns:
+        col1, col2 = st.columns(2)
 
-    with col1:
-        fig_box = px.box(
-            df, x="city", y=TARGET_COL, color="city",
-            labels={TARGET_COL: "Rating", "city": "City"},
+        with col1:
+            fig_box = px.box(
+                df, x="city", y=TARGET_COL, color="city",
+                labels={TARGET_COL: "Rating", "city": "City"},
+                color_discrete_map={"LA": "coral", "NYC": "steelblue"},
+            )
+            fig_box.update_layout(showlegend=False)
+            st.plotly_chart(fig_box, use_container_width=True)
+
+        with col2:
+            city_stats = df.groupby("city")[TARGET_COL].agg(["count", "mean", "median", "std"]).round(3)
+            city_stats.columns = ["Count", "Mean", "Median", "Std Dev"]
+            st.dataframe(city_stats, use_container_width=True)
+
+        st.markdown("---")
+
+        st.subheader("Price vs Rating")
+        max_price = st.slider("Max price to display ($)", 50, 2000, 500)
+
+        df_filtered = df[df["price"] <= max_price]
+        sample_size = min(5000, len(df_filtered))
+        df_sample = df_filtered.sample(n=sample_size, random_state=42)
+
+        fig_scatter = px.scatter(
+            df_sample, x="price", y=TARGET_COL, color="city",
+            opacity=0.4,
+            labels={"price": "Price ($)", TARGET_COL: "Rating"},
             color_discrete_map={"LA": "coral", "NYC": "steelblue"},
         )
-        fig_box.update_layout(showlegend=False)
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
-    with col2:
-        city_stats = df.groupby("city")[TARGET_COL].agg(["count", "mean", "median", "std"]).round(3)
-        city_stats.columns = ["Count", "Mean", "Median", "Std Dev"]
-        st.dataframe(city_stats, use_container_width=True)
-
-    st.markdown("---")
-
-    st.subheader("Price vs Rating")
-    max_price = st.slider("Max price to display ($)", 50, 2000, 500)
-
-    df_filtered = df[df["price"] <= max_price]
-    sample_size = min(5000, len(df_filtered))
-    df_sample = df_filtered.sample(n=sample_size, random_state=42)
-
-    fig_scatter = px.scatter(
-        df_sample, x="price", y=TARGET_COL, color="city",
-        opacity=0.4,
-        labels={"price": "Price ($)", TARGET_COL: "Rating"},
-        color_discrete_map={"LA": "coral", "NYC": "steelblue"},
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-    st.markdown("---")
+        st.markdown("---")
 
     st.subheader("Listings Map (colored by rating)")
 
@@ -212,13 +215,13 @@ def page_eda():
     st.plotly_chart(fig_map, use_container_width=True)
 
     st.markdown("---")
-
-    st.subheader("Room Type Distribution")
-    fig_room = px.histogram(
-        df, x="room_type", color="city", barmode="group",
-        color_discrete_map={"LA": "coral", "NYC": "steelblue"},
-    )
-    st.plotly_chart(fig_room, use_container_width=True)
+    if "room_type" in df.columns:
+        st.subheader("Room Type Distribution")
+        fig_room = px.histogram(
+            df, x="room_type", color="city", barmode="group",
+            color_discrete_map={"LA": "coral", "NYC": "steelblue"},
+        )
+        st.plotly_chart(fig_room, use_container_width=True)
 
 
 def page_model():
@@ -359,13 +362,13 @@ def page_model():
 def page_predict():
     st.header("Predict a Listing Rating")
 
-    df = load_data()
+    # df = load_data()
     model = load_model()
 
-    if df is None:
-        st.info("Base data file not available. Only batch CSV upload is available.")
-        page_predict_batch(df, model)
-        return
+    # if df is None:
+    #     st.info("Base data file not available. Only batch CSV upload is available.")
+    #     page_predict_batch(model)
+    #     return
 
     input_method = st.radio(
         "Choose input method:",
@@ -374,12 +377,12 @@ def page_predict():
     )
 
     if input_method == "Batch Upload (CSV)":
-        page_predict_batch(df, model)
+        page_predict_batch(model)
     else:
-        page_predict_single(df, model)
+        page_predict_single(model)
 
 
-def page_predict_batch(df, model):
+def page_predict_batch(model):
     st.subheader("Upload CSV for Batch Predictions")
 
     st.markdown("""
@@ -411,21 +414,19 @@ def page_predict_batch(df, model):
                     st.error("Model file not available. Cannot generate predictions.")
                 else:
                     with st.spinner("Preparing data and generating predictions..."):
-                        if df is not None:
-                            _, X_template, _, _ = prepare_model_data(df)
-                        else:
-                            feat_template = load_feature_template()
-                            if feat_template is None:
-                                st.error("Neither data file nor feature template available.")
-                                st.stop()
-                            columns = feat_template["columns"]
-                            medians = feat_template["medians"]
-                            modes = feat_template["modes"]
-                            row = {col: medians.get(col, 0) for col in columns}
-                            row.update(modes)
-                            X_template = pd.DataFrame([row])[columns]
 
-                        pred_df = prepare_batch_for_prediction(user_df, X_template, df)
+                        feat_template = load_feature_template()
+                        if feat_template is None:
+                            st.error("Neither data file nor feature template available.")
+                            st.stop()
+                        columns = feat_template["columns"]
+                        medians = feat_template["medians"]
+                        modes = feat_template["modes"]
+                        row = {col: medians.get(col, 0) for col in columns}
+                        row.update(modes)
+                        X_template = pd.DataFrame([row])[columns]
+
+                        pred_df = prepare_batch_for_prediction(user_df)
 
                         predictions = model.predict(pred_df)
 
@@ -488,95 +489,16 @@ def page_predict_batch(df, model):
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
 
-def prepare_batch_for_prediction(user_df, X_template, reference_df):
-    template = X_template.median(numeric_only=True).to_dict()
+def prepare_batch_for_prediction(user_df):
 
-    for col in X_template.select_dtypes(include=["object"]).columns:
-        mode_vals = X_template[col].mode()
-        template[col] = mode_vals.iloc[0] if len(mode_vals) > 0 else ""
-
-    rows = []
-    for idx, row in user_df.iterrows():
-        pred_row = template.copy()
-
-        direct_cols = [
-            "price", "accommodates", "bedrooms", "beds", "bathrooms",
-            "latitude", "longitude", "minimum_nights", "maximum_nights",
-            "host_response_rate", "host_experience_days", "instant_bookable",
-            "amenities_count", "host_is_superhost", "property_type",
-            "has_wifi", "has_heating", "has_workspace", "has_hot_water",
-            "has_smoke_alarm", "has_first_aid", "has_hot_tub", "has_gym",
-            "host_response_time", "geo_cluster",
-        ]
-
-        numeric_cols = [
-            "price", "accommodates", "bedrooms", "beds", "bathrooms",
-            "latitude", "longitude", "minimum_nights", "maximum_nights",
-            "host_response_rate", "host_experience_days", "amenities_count",
-        ]
-
-        for col in direct_cols:
-            if col in row.index and pd.notna(row[col]):
-                val = row[col]
-                if col in numeric_cols:
-                    try:
-                        val = float(val)
-                    except (ValueError, TypeError):
-                        val = pred_row[col]
-                pred_row[col] = val
-
-        if "host_is_superhost" in row.index:
-            val = row["host_is_superhost"]
-            if isinstance(val, str):
-                pred_row["host_is_superhost"] = 1 if val.lower() in ["true", "t", "yes", "1"] else 0
-            else:
-                pred_row["host_is_superhost"] = int(val) if pd.notna(val) else 0
-
-        if "instant_bookable" in row.index:
-            val = row["instant_bookable"]
-            if isinstance(val, str):
-                pred_row["instant_bookable"] = 1 if val.lower() in ["true", "t", "yes", "1"] else 0
-            else:
-                pred_row["instant_bookable"] = int(val) if pd.notna(val) else 0
-
-        price = float(pred_row.get("price", 100) or 100)
-        accommodates = max(float(pred_row.get("accommodates", 2) or 2), 1)
-        bedrooms = float(pred_row.get("bedrooms", 1) or 1)
-        beds = float(pred_row.get("beds", 1) or 1)
-        bathrooms = float(pred_row.get("bathrooms", 1) or 1)
-        minimum_nights = float(pred_row.get("minimum_nights", 2) or 2)
-
-        pred_row["log_price"] = np.log1p(price)
-        pred_row["log_minimum_nights"] = np.log1p(minimum_nights)
-        pred_row["price_per_person"] = price / accommodates
-        pred_row["bedrooms_per_person"] = bedrooms / accommodates
-        pred_row["beds_per_person"] = beds / accommodates
-        pred_row["bathrooms_per_person"] = bathrooms / accommodates
-        pred_row["min_stay_cost"] = price * minimum_nights
-
-        host_response_time = pred_row.get("host_response_time", "")
-        pred_row["response_time_score"] = RESPONSE_TIME_MAP.get(host_response_time, 0)
-
-        safety_cols = ["has_smoke_alarm", "has_first_aid"]
-        pred_row["safety_amenities_count"] = sum(
-            1 for col in safety_cols if pred_row.get(col, 0) == 1
-        )
-
-        for col in ["price_missing", "beds_missing", "bedrooms_missing",
-                    "bathrooms_missing", "host_response_rate_missing", "host_acceptance_rate_missing"]:
-            pred_row[col] = 0
-
-        rows.append(pred_row)
-
-    result = pd.DataFrame(rows)
-    result = result[X_template.columns]
+    result,_ = preprocess(user_df,False)
     return result
 
 
-def page_predict_single(df, model):
+def page_predict_single(model):
     st.markdown("Adjust the listing features below to predict its rating.")
 
-    top_property_types = df["property_type"].value_counts().head(20).index.tolist()
+    top_property_types = TOP_PROPERTY_TYPE#df["property_type"].value_counts().head(20).index.tolist()
 
     st.subheader("Listing Features")
 
@@ -620,12 +542,8 @@ def page_predict_single(df, model):
         city = st.selectbox("City", ["LA", "NYC"])
 
     if st.button("Predict Rating", type="primary"):
-        _, X_test, _, _ = prepare_model_data(df)
+        template={}
 
-        template = X_test.median(numeric_only=True).to_dict()
-
-        for col in X_test.select_dtypes(include=["object"]).columns:
-            template[col] = X_test[col].mode().iloc[0] if len(X_test[col].mode()) > 0 else ""
 
         template["host_is_superhost"] = 1 if is_superhost == "Yes" else 0
         template["host_response_rate"] = host_response_rate
@@ -666,23 +584,23 @@ def page_predict_single(df, model):
             1 if has_first_aid else 0,
         ])
         template["safety_amenities_count"] = safety_sum
-
+        # template
         for col in ["price_missing", "beds_missing", "bedrooms_missing",
                     "bathrooms_missing", "host_response_rate_missing", "host_acceptance_rate_missing"]:
             if col in template:
                 template[col] = 0
 
         pred_row = pd.DataFrame([template])
-        pred_row = pred_row[X_test.columns]
-
-        prediction = model.predict(pred_row)[0]
+        # pred_row = pred_row[X_test.columns]
+        pred_row_clean,_=preprocess(pred_row)
+        prediction = model.predict(pred_row_clean)[0]
 
         st.markdown("---")
         st.subheader("Prediction Result")
 
         col1, col2, col3 = st.columns(3)
 
-        avg_rating = df[TARGET_COL].mean()
+        avg_rating = 4.75#df[TARGET_COL].mean()
         delta = prediction - avg_rating
 
         with col1:

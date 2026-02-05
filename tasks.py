@@ -115,14 +115,14 @@ def summary(c, pred_csv=PREDICTIONS):
 
 
 @task(pre=[clean])
-def pipeline(c, model="random_forest", test_size=0.2, cv=5, n_iter=20, tune=True, wandb=True):
+def pipeline(c, model="random_forest", test_size=0.2, cv=5, n_iter=20, tune=True, wandb=True,is_trainig=True):
     """
     Run the full end-to-end pipeline with all training configuration options.
     """
     print("🚀 Starting full pipeline run...")
 
     # 1. Preprocess
-    preprocess(c, inputs=RAW_DATA, output=CLEAN_DATA)
+    preprocess(c, inputs=RAW_DATA, output=CLEAN_DATA,is_training=is_trainig)
 
     # 2. Train (passing all arguments down)
     train(c, input_csv=CLEAN_DATA, model=model,

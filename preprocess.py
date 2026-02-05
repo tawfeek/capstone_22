@@ -4,6 +4,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Union
 
 import joblib
 import pandas as pd
@@ -292,10 +293,13 @@ def apply_log_transforms(df: pd.DataFrame, columns: list) -> pd.DataFrame:
             df[f"log_{col}"] = np.log1p(df[col].fillna(0).clip(lower=0))
             # Drop original to avoid collinearity
             df = df.drop(columns=[col])
+        else:
+            df[f"log_{col}"] = None
+            # df = df.drop(columns=[col])
     return df
 
 
-def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
+def run_initial_cleaning(dfs, drop_missing_target: bool = True,is_training:bool = False):
     """
     Loads LA + NYC listings, performs feature engineering and cleaning.
 
@@ -309,22 +313,22 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
 
     Returns (df_clean, cleaning_summary).
     """
-    if isinstance(file_inputs, str):
-        paths = [file_inputs]
-    elif isinstance(file_inputs, list):
-        paths = file_inputs
-    else:
-        raise ValueError("file_inputs must be a string path or a list of paths.")
+    # if isinstance(file_inputs, str):
+    #     paths = [file_inputs]
+    # elif isinstance(file_inputs, list):
+    #     paths = file_inputs
+    # else:
+        # raise ValueError("file_inputs must be a string path or a list of paths.")
 
     processed_dfs = []
     total_original_rows = 0
     total_original_cols = 0
-    for path in paths:
-        if not os.path.exists(path):
-            print(f"Warning: Path {path} does not exist. Skipping.")
-            continue
+    for df in dfs:
+        # if not os.path.exists(path):
+        #     print(f"Warning: Path {path} does not exist. Skipping.")
+        #     continue
 
-        df = pd.read_csv(path)
+        # df = pd.read_csv(path)
         total_original_rows += len(df)
         total_original_cols = max(total_original_cols, len(df.columns))
         # =========================================
@@ -361,7 +365,8 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
             # Extract key amenities as binary features
             key_amenities_df = extract_key_amenities(df["amenities"])
             df = pd.concat([df, key_amenities_df], axis=1)
-
+        if "estimated_occupancy_l365d" not in df.columns:
+            df["estimated_occupancy_l365d"] = None
         # Description features
         if "description" in df.columns:
             df["description_length"] = extract_text_length(df["description"])
@@ -369,7 +374,11 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
             # Text mining: luxury and warning keywords
             df["luxury_count"] = extract_luxury_score(df["description"])
             df["warning_count"] = extract_warning_score(df["description"])
-
+        else:
+            df["description_length"] = None
+            df["description_word_count"] = None
+            df["luxury_count"] = None
+            df["warning_count"] = None
         # Name length
         if "name" in df.columns:
             df["name_length"] = extract_text_length(df["name"])
@@ -382,11 +391,14 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
         if "host_about" in df.columns:
             df["has_host_about"] = df["host_about"].notna().astype(int)
             df["host_about_length"] = extract_text_length(df["host_about"])
-
+        else:
+            df["has_host_about"] = None
+            df["host_about_length"] = None
         # Host verifications count
         if "host_verifications" in df.columns:
             df["host_verifications_count"] = extract_host_verifications_count(df["host_verifications"])
-
+        else:
+            df["host_verifications_count"] = None
         # =========================================
         # 4b. HOST EXPERIENCE (days since joining)
         # =========================================
@@ -484,7 +496,8 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
     # 7. REMOVE DUPLICATES
     # =========================================
     rows_before_dedup = len(df)
-    df = df.drop_duplicates()
+    if is_training:
+        df = df.drop_duplicates()
     duplicates_removed = rows_before_dedup - len(df)
     # Build summary
     new_features = [
@@ -529,9 +542,22 @@ def run_initial_cleaning(file_inputs, drop_missing_target: bool = True):
 
 
 
-def preprocess(file_inputs, drop_missing_target: bool = True):
+def preprocess(file_inputs:Union[str,pd.DataFrame], drop_missing_target: bool = True,is_training:bool = False):
+    if isinstance(file_inputs, str):
+        file_inputs = [file_inputs]
+
+    if isinstance(file_inputs, str) or isinstance(file_inputs, list):
+        dfs=[]
+        for path in file_inputs:
+            if not os.path.exists(path):
+                print(f"Warning: Path {path} does not exist. Skipping.")
+            else:
+              dfs.append(pd.read_csv(path))
+    else:
+        dfs=[file_inputs]
+    #     continue
     # 1. Run your existing multi-file cleaning and feature extraction
-    df, summary = run_initial_cleaning(file_inputs, drop_missing_target)
+    df, summary = run_initial_cleaning(dfs, drop_missing_target,is_training)
 
     # 2. Final Feature Selection
     # Keep categorical strings (like neighborhood) so train.py can encode them
@@ -563,12 +589,17 @@ def main():
         action="store_true",
         help="If set, keep rows with missing target (for inference mode)"
     )
-
+    parser.add_argument(
+        "--is-training",
+        action="store_true",
+        help="If set, enables training mode (removes duplicates)"
+    )
 
     args = parser.parse_args()
     print("args: ", args)
     df_clean, summary = preprocess(args.input_paths,
-                                   drop_missing_target=not args.keep_missing_target
+                                   drop_missing_target=not args.keep_missing_target,
+                                   is_training=args.is_training
                                    )
 
     _ensure_parent_dir(args.out_csv)
